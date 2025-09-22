@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'wordpress' => [
+        'client_id' => env('WP_CLIENT_ID'),
+        'client_secret' => env('WP_CLIENT_SECRET'),
+        'redirect' => env('WP_REDIRECT_URI'),
+        'base_url' => env('BASE_URL'),
+    ],
+
+
 ];
