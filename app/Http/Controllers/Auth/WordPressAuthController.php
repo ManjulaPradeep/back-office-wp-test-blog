@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use Laravel\Socialite\Facades\Socialite;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Session;
 
 class WordPressAuthController extends Controller
 {
@@ -14,7 +17,21 @@ class WordPressAuthController extends Controller
      */
     public function redirectToWP()
     {
-        return Socialite::driver('wordpress')->redirect();
+        return Socialite::driver('wordpress')->scopes(['global'])->redirect();
+    }
+
+    private function getWpApiBase(): string
+    {
+        $siteId = Session::get('wp_site_id');
+
+        if (!$siteId) {
+            throw new \Exception('No WordPress site ID found in session');
+        }
+
+        $wpBaseUrl = config('services.wordpress.wp_base_url');
+        $apiVersion = config('services.wordpress.wp_dev_api_version');
+        $api = "rest/{$apiVersion}";
+        return "{$wpBaseUrl}/{$api}";
     }
 
     /**
@@ -23,24 +40,113 @@ class WordPressAuthController extends Controller
     public function handleWPCallback()
     {
         try {
-            // @todo [MP-2025]: For future use, if we need stateless (API or SPA flow), uncomment the line below
-            // $wpUser = Socialite::driver('wordpress')->stateless()->user();
             $wpUser = Socialite::driver('wordpress')->user();
-            $loginErrorMessage = __('errors.auth.wp_login_failed');
         } catch (\Exception $e) {
-            return redirect('/auth/login')->withErrors($loginErrorMessage);
+            Log::error('WordPress OAuth failed: ' . $e->getMessage());
+            return redirect('/auth/login')->withErrors(__('errors.auth.wp_login_failed'));
         }
 
-        $user = User::firstOrCreate(
-            ['email' => $wpUser->getEmail()],
-            [
-                'name' => $wpUser->getName() ?? $wpUser->getNickname(),
-                'password' => bcrypt(str()->random(16)),
-            ]
-        );
+        try {
+            $wpApiBase = $this->getWpApiBase();
 
-        Auth::login($user, true);
+            $sitesResponse = Http::withToken($wpUser->token)->get("{$wpApiBase}/me/sites");
 
-        return redirect('/dashboard');
+            if ($sitesResponse->failed()) {
+                Log::error('Failed to fetch user sites', [
+                    'status' => $sitesResponse->status(),
+                    'body' => $sitesResponse->body()
+                ]);
+                return redirect('/auth/login')->withErrors(__('errors.auth.wp_api_failed'));
+            }
+
+            $sitesData = $sitesResponse->json();
+            $sites = $sitesData['sites'] ?? [];
+
+            if (empty($sites)) {
+                return redirect('/auth/login')->withErrors(__('errors.auth.no_sites'));
+            }
+
+            $adminSite = null;
+            foreach ($sites as $site) {
+                if ($this->isUserAdminOfSite($site)) {
+                    $adminSite = $site;
+                    break;
+                }
+            }
+
+            if (!$adminSite) {
+                Log::warning('User has no admin sites', [
+                    'user_email' => $wpUser->getEmail(),
+                    'sites_count' => count($sites)
+                ]);
+                return redirect('/auth/login')->withErrors(__('errors.auth.not_admin'));
+            }
+
+            $user = User::updateOrCreate(
+                ['email' => $wpUser->getEmail()],
+                [
+                    'name' => $wpUser->getName() ?? $wpUser->getNickname(),
+                    'password' => bcrypt(str()->random(16)),
+                    'wp_site_id' => $adminSite['ID'],
+                    'wp_site_url' => $adminSite['URL'],
+                    'wp_site_name' => $adminSite['name'],
+                    'wp_user_id' => $wpUser->getId(),
+                ]
+            );
+
+            Session::put('wp_token', $wpUser->token);
+            Session::put('wp_site_id', $adminSite['ID']);
+            Session::put('wp_site_url', $adminSite['URL']);
+
+            Log::info('Admin user logged in successfully', [
+                'user_id' => $user->id,
+                'wp_site_id' => $adminSite['ID'],
+                'wp_site_name' => $adminSite['name']
+            ]);
+
+            Auth::login($user, true);
+
+            return redirect()->intended('/dashboard');
+
+        } catch (\Exception $e) {
+            Log::error('WordPress authentication process failed: ' . $e->getMessage());
+            return redirect('/auth/login')->withErrors(__('errors.auth.wp_login_failed'));
+        }
+    }
+
+    /**
+     * Check if user is admin of a specific site
+     */
+    private function isUserAdminOfSite(array $site): bool
+    {
+
+        if (isset($site['user_can_manage']) && $site['user_can_manage']) {
+            return true;
+        }
+
+        if (isset($site['capabilities']) && is_array($site['capabilities'])) {
+            $adminCapabilities = ['manage_options', 'edit_users', 'install_plugins'];
+            foreach ($adminCapabilities as $cap) {
+                if (isset($site['capabilities'][$cap]) && $site['capabilities'][$cap]) {
+                    return true;
+                }
+            }
+        }
+
+        if (isset($site['roles']) && in_array('administrator', $site['roles'])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Logout user
+     */
+    public function logout()
+    {
+        Session::forget(['wp_token', 'wp_site_id', 'wp_site_url']);
+        Auth::logout();
+        return redirect('/auth/login');
     }
 }
