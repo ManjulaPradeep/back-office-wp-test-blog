@@ -25,7 +25,13 @@ export default {
     components: { PostsTable },
     methods: {
         logout() {
-            axios.post('/auth/logout').then(() => window.location = '/auth/login');
+            axios.post('/auth/logout', {}, {
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                }
+            }).then(() => {
+                window.location = '/auth/login';
+            });
         }
     }
 }

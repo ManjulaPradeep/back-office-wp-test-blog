@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
+use Illuminate\Http\Request;
 use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -143,10 +144,15 @@ class WordPressAuthController extends Controller
     /**
      * Logout user
      */
-    public function logout()
+    public function logout(Request $request)
     {
         Session::forget(['wp_token', 'wp_site_id', 'wp_site_url']);
         Auth::logout();
+
+        if ($request->expectsJson()) {
+            return response()->json(['success' => true]);
+        }
+
         return redirect('/auth/login');
     }
 }
