@@ -21,6 +21,12 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'wp_id',
+        'wp_site_id',
+        'wp_role',
+        'wp_token',
+        'wp_site_url',
+        'wp_site_name',
     ];
 
     /**
@@ -31,6 +37,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'wp_token',
     ];
 
     /**
@@ -44,5 +51,13 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Check if the user is a WordPress admin.
+     */
+    public function isWpAdmin(): bool
+    {
+        return $this->wp_role === 'administrator';
     }
 }

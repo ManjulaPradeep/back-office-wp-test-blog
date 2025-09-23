@@ -39,7 +39,8 @@ return [
         'client_id' => env('WP_CLIENT_ID'),
         'client_secret' => env('WP_CLIENT_SECRET'),
         'redirect' => env('WP_REDIRECT_URI'),
-        'base_url' => env('BASE_URL'),
+        'wp_base_url' => env('WP_BASE_URL'),
+        'wp_dev_api_version' => env('WP_DEVELOPER_API_VERSION','v1.1'),
     ],
 
 
